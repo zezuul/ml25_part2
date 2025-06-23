@@ -1,0 +1,375 @@
+---
+jupyter:
+  jupytext:
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.2'
+      jupytext_version: 1.16.7
+  kernelspec:
+    display_name: Python 3 (ipykernel)
+    language: python
+    name: python3
+---
+
+<!-- #region editable=true slideshow={"slide_type": ""} -->
+# Counterfeit detection
+<!-- #endregion -->
+
+The task in this assignment is to detect the  counterfeit banknotes. The data set is based on [banknote authentication Data Set ](https://archive.ics.uci.edu/ml/datasets/banknote+authentication#) from UCI Machine Learning repository.  You have already used this set but this time I have removed  the first column. The set  `banknote_authentication.csv` can be found in the `data`  directory.
+
+```{python}
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy.stats as st
+from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
+from sklearn.metrics import confusion_matrix, roc_auc_score, roc_curve
+from sklearn.model_selection import train_test_split, StratifiedKFold
+from sklearn.mixture import GaussianMixture
+```
+
+```{python}
+import warnings
+warnings.filterwarnings("ignore")
+
+```
+
+```{python}
+data = pd.read_csv('data/banknote_authentication.csv' )
+```
+
+```{python}
+data.head()
+```
+
+## Problem 
+
+
+### A.
+
+
+Perform the Quadratic Discriminant Analysis on this set. Calculate the confusion matrix, AUC score and plot the ROC curve. 
+
+```{python}
+X = data[['a1', 'a2', 'a3']].values
+y = data['counterfeit'].values
+```
+
+```{python}
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+```
+
+```{python}
+qda_model = QuadraticDiscriminantAnalysis()
+qda_model.fit(X_train, y_train)
+```
+
+```{python}
+y_pred = qda_model.predict(X_test)
+y_proba = qda_model.predict_proba(X_test)[:, 1]
+```
+
+```{python}
+confm = confusion_matrix(y_test, y_pred)
+print("Confusion matrix")
+print(confm)
+```
+
+```{python}
+auc_score = roc_auc_score(y_test, y_proba)
+print(f"AUC = {auc_score:.3f}")
+```
+
+```{python}
+fpr, tpr, thresholds = roc_curve(y_test, y_proba)
+```
+
+```{python}
+plt.figure(figsize=(6, 4))
+plt.plot(fpr, tpr, linestyle ='-', linewidth=2, label=f'QDA model - AUC={auc_score:.3f})', color='orange')
+plt.plot([0, 1], [0, 1], linestyle ='--', linewidth=1, label='Random Classifier', color='pink')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('QDA ROC Curve')
+plt.legend(loc='lower right')
+plt.grid(True, alpha=0.3)
+plt.show()
+```
+
+### B.
+
+
+Perform Gaussian Mixture Discriminant Analysis on this set as described in the `gaussian_mixture_model_EM_algorithm` notebook. Use two components for positives and two components for negatives. Calculate the confusion matrix, AUC score and plot the ROC curve. 
+
+```{python}
+positive_mixture = GaussianMixture(n_components=2, max_iter=100, tol=0.0001)
+negative_mixture = GaussianMixture(n_components=2, max_iter=100, tol=0.0001)
+```
+
+```{python}
+def make_pdf(cmp):
+    n_cmp = cmp.n_components
+    dists = [st.multivariate_normal(cmp.means_[i], cmp.covariances_[i]) 
+             for i in range(n_cmp)]
+    def pdf(x):
+        p = 0.0
+        for i in range(n_cmp):
+            p += cmp.weights_[i] * dists[i].pdf(x)
+        return p
+    return pdf
+
+def make_predict_proba(cmp0, cmp1, pi0=0.5, pi1=0.5):
+    pdf0 = make_pdf(cmp0)
+    pdf1 = make_pdf(cmp1)
+    def p(x):
+        p0 = pi0 * pdf0(x)
+        p1 = pi1 * pdf1(x)
+        return p1/(p1+p0)
+    return p
+```
+
+```{python}
+X_train_negative = X_train[y_train == 0]
+X_train_positive = X_train[y_train == 1]
+```
+
+```{python}
+negative_mixture.fit(X_train_negative)
+positive_mixture.fit(X_train_positive)
+```
+
+```{python}
+prob_negative = len(X_train_negative) / len(X_train)
+prob_positive = len(X_train_positive) / len(X_train)
+```
+
+```{python}
+gmda_predict_proba = make_predict_proba(negative_mixture, positive_mixture, prob_negative, prob_positive)
+```
+
+```{python}
+gmda_proba = np.array([gmda_predict_proba(x) for x in X_test])
+gmda_pred = (gmda_proba > 0.5).astype(int)
+```
+
+```{python}
+gmda_confm = confusion_matrix(y_test, gmda_pred)
+print("Confusion matrix")
+print(gmda_conf_matrix)
+```
+
+```{python}
+gmda_auc_score = roc_auc_score(y_test, gmda_proba)
+print(f"AUC={gmda_auc_score:.3f}")
+```
+
+```{python}
+gmda_fpr, gmda_tpr, gmda_thresholds = roc_curve(y_test, gmda_proba)
+```
+
+```{python}
+plt.figure(figsize=(8, 6))
+plt.plot(gmda_fpr, gmda_tpr, color='crimson', linewidth=2, label=f'AUC={gmda_auc_score:.3f})')
+plt.plot([0, 1], [0, 1], linestyle='--', color='gray', linewidth=1, label='Random Classifier')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('GMDA ROC Curve')
+plt.legend(loc='lower right')
+plt.grid(True, alpha=0.3)
+plt.show()
+```
+
+### C.
+
+
+Use k-fold cross validation to find the optimal number of gaussian components for each class. As before calculate the confusion matrix, AUC score and plot the ROC curve for the best classifier. Assume that maximal number of components in each class is 12.  
+
+
+__Hint__ use the `StratifiedKFold` function from scikit-learn library to generate folds. 
+
+```{python}
+n_splits = 5
+max_components = 12
+```
+
+```{python}
+def evaluate_gmda(nc0, nc1, X_train, y_train, X_valid, y_valid):
+    gmm_class0 = GaussianMixture(n_components=nc0, max_iter=100, tol=0.0001)
+    gmm_class1 = GaussianMixture(n_components=nc1, max_iter=100, tol=0.0001)
+    
+    X_class0 = X_train[y_train == 0]
+    X_class1 = X_train[y_train == 1]
+    gmm_class0.fit(X_class0)
+    gmm_class1.fit(X_class1)
+    
+    p0 = len(X_class0) / len(X_train)
+    p1 = len(X_class1) / len(X_train)
+    
+    gmda_classifier = make_predict_proba(gmm_class0, gmm_class1, p0, p1)
+    proba = np.array([gmda_classifier(x) for x in X_valid])
+    return roc_auc_score(y_valid, proba)
+```
+
+```{python}
+def grid_search_gmda(X_train, y_train, evaluate_fn, max_components=12, n_splits=5, random_state=42):
+    results = {}
+    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+
+    for nc0 in range(1, max_components + 1):
+        for nc1 in range(1, max_components + 1):
+            scores = []
+
+            for train_idx, val_idx in cv.split(X_train, y_train):
+                X_tr, y_tr = X_train[train_idx], y_train[train_idx]
+                X_val, y_val = X_train[val_idx], y_train[val_idx]
+                score = evaluate_fn(nc0, nc1, X_tr, y_tr, X_val, y_val)
+                scores.append(score)
+
+            avg_score = np.mean(scores)
+            results[(nc0, nc1)] = avg_score
+
+    best_combo = max(results, key=results.get)
+    best_score = results[best_combo]
+
+    return best_combo, best_score, results
+```
+
+```{python}
+best_combo, best_score, all_scores = grid_search_gmda(
+    X_train, y_train, evaluate_gmda, max_components=12, n_splits=5
+)
+
+print(f"Best (nc0, nc1): {best_combo}")
+print(f"Best AUC Score: {best_score:.4f}")
+```
+
+```{python}
+optimal_gmm0 = GaussianMixture(n_components=best_combo[0], max_iter=100, tol=0.0001)
+optimal_gmm1 = GaussianMixture(n_components=best_combo[1], max_iter=100, tol=0.0001)
+```
+
+```{python}
+optimal_gmm0.fit(X_train_negative)
+optimal_gmm1.fit(X_train_positive)
+```
+
+```{python}
+optimal_classifier = make_predict_proba(optimal_gmm0, optimal_gmm1, prob_negative, prob_positive)
+```
+
+```{python}
+test_proba = np.array([optimal_classifier(x) for x in X_test])
+test_pred = (test_proba > 0.5).astype(int)
+```
+
+```{python}
+print("Confusion Matrix")
+print(confusion_matrix(y_test, test_pred))
+```
+
+```{python}
+test_auc = roc_auc_score(y_test, test_proba)
+print(f"AUC={test_auc:.3f}")
+```
+
+```{python}
+fpr_opt, tpr_opt, _ = roc_curve(y_test, test_proba)
+
+plt.figure(figsize=(8, 6))
+plt.plot(fpr_opt, tpr_opt, color='crimson', linewidth=2, 
+         label=f'Optimal GMDA AUC={test_auc:.3f})')
+plt.plot([0, 1], [0, 1], linestyle='--', color='gray', linewidth=1, label='Random Classifier')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title(f'ROC Curve - GMDA with {best_combo[0]},{best_combo[1]} Components')
+plt.legend(loc='lower right')
+plt.grid(True, alpha=0.3)
+plt.show()
+```
+
+## D.  
+
+
+Assume that 1% of all the customers in your store try to pay with a counterfeit 100PLN bill. If you accept the counterfeit bill you loose 100PLN. If you reject a valid bill,  you may loose the purchase, you estimate this loss as 15PLN on average. For each of the three classifiers find the threshold that minimises your losses and calculates the minimum loss for each classifier. Show the optimal classifiers points on the ROC curves.
+
+```{python editable=TRUE, slideshow={'slide_type': ''}}
+COST_CONFIG = {
+    "counterfeit_ratio": 0.01,
+    "genuine_ratio": 0.99,
+    "counterfeit_accept_cost": 100,
+    "rejected_genuine_cost": 15
+}
+```
+
+```{python}
+def calculate_expected_loss(fpr, fnr, config=COST_CONFIG):
+    return (config["genuine_ratio"] * fpr * config["rejected_genuine_cost"] +
+            config["counterfeit_ratio"] * fnr * config["counterfeit_accept_cost"])
+
+def find_optimal_threshold(y_true, y_proba, config=COST_CONFIG):
+    fpr, tpr, thresholds = roc_curve(y_true, y_proba)
+    fnr = 1 - tpr
+    losses = [calculate_expected_loss(fpr[i], fnr[i], config) for i in range(len(thresholds))]
+    
+    min_idx = np.argmin(losses)
+    
+    return {
+        "threshold": thresholds[min_idx],
+        "loss": losses[min_idx],
+        "fpr": fpr[min_idx],
+        "tpr": tpr[min_idx],
+        "roc": (fpr, tpr, thresholds)
+    }
+
+def evaluate_and_report_classifier(name, y_true, y_proba, config=COST_CONFIG):
+    result = find_optimal_threshold(y_true, y_proba, config)
+    auc = roc_auc_score(y_true, y_proba)
+    print(f"\n{name}:")
+    print(f"- optimal threshold = {result['threshold']:.4f}")
+    print(f"- expected loss (per customer) = {result['loss']:.4f} PLN")
+    return {**result, "auc": auc, "label": name}
+
+def plot_roc_with_optimal_points(results_list):
+    plt.figure(figsize=(10, 8))
+    
+    colors = ['crimson', 'orange', 'green', 'grey', 'pink']
+    
+    for i, result in enumerate(results_list):
+        fpr, tpr, _ = result["roc"]
+        plt.plot(fpr, tpr, color=colors[i], lw=2, 
+                 label=f"{result['label']} (AUC = {result['auc']:.4f})")
+        plt.plot(result["fpr"], result["tpr"], 'o', color=colors[i], markersize=10,
+                 label=f"{result['label']} optimal (τ={result['threshold']:.3f}, loss={result['loss']:.2f})")
+
+    plt.plot([0, 1], [0, 1], 'k--', linewidth=1, label='Random Classifier')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('ROC curves with optimal points')
+    plt.legend(loc='lower right', fontsize=9)
+    plt.grid(True, alpha=0.3)
+    plt.xlim(-0.02, 1.02)
+    plt.ylim(-0.02, 1.02)
+    plt.show()
+```
+
+```{python}
+qda_result = evaluate_and_report_classifier("QDA", y_test, y_proba)
+```
+
+```{python}
+gmda22_result = evaluate_and_report_classifier("GMDA (2,2)", y_test, gmda_proba)
+```
+
+```{python}
+opt_gmda_result = evaluate_and_report_classifier(
+    f"Optimal GMDA ({best_combo[0]},{best_combo[1]})", y_test, test_proba)
+```
+
+```{python}
+plot_roc_with_optimal_points([qda_result, gmda22_result, opt_gmda_result])
+```
+
+```{python}
+
+```

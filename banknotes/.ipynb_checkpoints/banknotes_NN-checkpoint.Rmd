@@ -1,0 +1,195 @@
+---
+jupyter:
+  jupytext:
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.2'
+      jupytext_version: 1.16.7
+  kernelspec:
+    display_name: Python 3 (ipykernel)
+    language: python
+    name: python3
+---
+
+<!-- #region editable=true slideshow={"slide_type": ""} -->
+# Counterfeit detection
+<!-- #endregion -->
+
+The task in this assignment is to detect the  counterfeit banknotes. The data set is based on [banknote authentication Data Set ](https://archive.ics.uci.edu/ml/datasets/banknote+authentication#) from UCI Machine Learning repository. The first three columns denote different parameters obtained from the photographs of the banknotes and last colum provides the label. Frankly as the dataset does not have any description I don't know  which labels corresponds to real and which to counterfeited banknotes. let's assume that label one (positive) denotes the clounterfeits. The set  [banknote_authentication.csv](./data/banknote_authentication.csv) can be found in the `data`  directory.
+
+```{python}
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy.stats as st
+```
+
+```{python}
+from sklearn.metrics import classification_report, ConfusionMatrixDisplay
+```
+
+```{python}
+import  matplotlib.pyplot as plt
+plt.rcParams['figure.figsize']=(8,8)
+```
+
+Please insert you  firstname  and name below
+
+
+Julia Zezula
+
+```{python}
+from  sklearn.model_selection import train_test_split
+seed = 31287
+```
+
+```{python}
+data = pd.read_csv('data/banknotes_data.csv')
+```
+
+```{python}
+data.head()
+```
+
+```{python tags=c("skip")}
+data.describe()
+```
+
+```{python tags=c("skip")}
+data.info()
+```
+
+```{python}
+data_train, data_test = train_test_split(data, test_size=0.2, shuffle=True, stratify=data.loc[:,'counterfeit'], random_state=seed)
+```
+
+```{python}
+data_train
+```
+
+```{python}
+lbls_train = data_train['counterfeit']
+lbls_test = data_test['counterfeit']
+```
+
+```{python}
+fig, ax = plt.subplots(1,4, figsize=(22,5))
+for i in range(4):
+    ax[i].hist(data_train[lbls_train==0].iloc[:,i], bins=32, histtype='step', color='blue')
+    ax[i].hist(data_train[lbls_train==1].iloc[:,i], bins=32, histtype='step', color='red')
+    ax[i].hist(data_train[lbls_train==0].iloc[:,i], bins=32, histtype='bar', color='lightblue', alpha=0.25)
+    ax[i].hist(data_train[lbls_train==1].iloc[:,i], bins=32, histtype='bar', color='orange', alpha =0.25)
+```
+
+<!-- #region editable=true slideshow={"slide_type": ""} -->
+# Problem 1
+<!-- #endregion -->
+
+<!-- #region editable=true slideshow={"slide_type": ""} -->
+Train a neural network classifier to predict counterfeit banknotes. Use the features `a0` and `a3`. Calculate the confussion matrix  and AUC score. 
+<!-- #endregion -->
+
+```{python editable=TRUE, slideshow={'slide_type': ''}}
+import torch
+import torch.nn as tnn
+from sklearn.metrics import roc_curve, confusion_matrix, accuracy_score, roc_auc_score
+```
+
+```{python editable=TRUE, slideshow={'slide_type': ''}}
+features= [0, 3]
+nf=len(features)
+```
+
+```{python editable=TRUE, slideshow={'slide_type': ''}}
+features_train = torch.from_numpy(data_train.values[:,features]).to(dtype=torch.float32)
+labels_train = torch.from_numpy(data_train.values[:,4:5]).to(dtype=torch.float32)
+```
+
+```{python editable=TRUE, slideshow={'slide_type': ''}}
+features_test = torch.from_numpy(data_test.values[:,features]).to(dtype=torch.float32)
+labels_test = torch.from_numpy(data_test.values[:,4:5]).to(dtype=torch.float32)
+```
+
+```{python}
+labels_np = labels_train.numpy()
+num_positive = np.sum(labels_np == 1)
+num_negative = np.sum(labels_np == 0)
+pos_weight = torch.tensor([num_negative / num_positive], dtype=torch.float32)
+```
+
+```{python editable=TRUE, slideshow={'slide_type': ''}}
+class Classifier(tnn.Module):
+    def __init__(self, nf):
+        super().__init__()
+        self.net = tnn.Sequential(
+            tnn.Linear(nf, nf * 4),
+            tnn.BatchNorm1d(nf * 4),
+            tnn.ReLU(),
+
+            tnn.Linear(nf * 4, nf * 2),
+            tnn.ReLU(),
+
+            tnn.Linear(nf * 2, nf),
+            tnn.ReLU(),
+
+            tnn.Linear(nf, 1)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+```
+
+```{python editable=TRUE, slideshow={'slide_type': ''}}
+model = Classifier(nf)
+```
+
+```{python editable=TRUE, slideshow={'slide_type': ''}}
+loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+```
+
+```{python editable=TRUE, slideshow={'slide_type': ''}}
+epochs = 5000
+for epoch in range(epochs):
+    y_pred = model(features_train)
+    loss = loss_fn(y_pred, labels_train)
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    if epoch % 100 == 0:
+        print(f"Epoch {epoch} Loss: {loss.item():.4f}")
+```
+
+```{python}
+y_true = labels_test.numpy()
+with torch.no_grad():
+  y_proba = model(features_test)
+  y_predicted = 1*(y_proba>0.5)
+```
+
+```{python}
+accuracy_score(y_true, y_pred=y_predicted)
+```
+
+```{python}
+y_proba_np = y_proba.numpy()
+
+cm = confusion_matrix(y_true, y_predicted)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+disp.plot(cmap='Blues'))
+plt.title("Confusion Matrix")
+plt.show()
+```
+
+```{python}
+auc = roc_auc_score(y_true, y_proba_np)
+print(f"AUC={auc:.3f}")
+```
+
+```{python}
+
+```
